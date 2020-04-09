@@ -33,7 +33,36 @@ pub struct Connection {
     next_packet_id: i32,
 }
 
-const INITIAL_PACKET_ID: i32 = 1;
+fn initial_packet_id() -> i32 {
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher, Hash, Hasher};
+
+    // State seeded by the os rng on program start
+    // Each call to new increments the state
+    let s = RandomState::new();
+    let mut h = s.build_hasher();
+    // The thread id is not very random and is usually 1 in rust on linux
+    // On linux thread ids are only unique in one process.
+    // This is because rust sets up mulithreading protection and the main thread
+    // gets the tid of 1. If rust did not do this and the user did not create
+    // threads the thread id would be the process id.
+    // On windows thread ids are unique system wide.
+    // Windows: https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getcurrentthreadid
+    // Linux: https://linux.die.net/man/2/gettid
+    //
+    // SipHash is the default hashing algorithm for rust
+    // Because SipHash is a MAC an attacker should not be able to predict
+    // the value of state. Even if they guess the thread id this will not
+    // reveal the secret and not let them predict future packet ids
+    std::thread::current().id().hash(&mut h);
+    let hash: u64 = h.finish();
+
+    // Use all 64 bits of hash
+    // The absolute value op removes 1 bit of randomness but that is fine
+    ((hash ^ hash >> 32) as i32).abs()
+}
+
+const PACKET_ID_START: i32 = 1;
 
 const DELAY_TIME_MILLIS: u64 = 3;
 
@@ -42,7 +71,7 @@ impl Connection {
         let stream = TcpStream::connect(address).await?;
         let mut conn = Connection {
             stream,
-            next_packet_id: INITIAL_PACKET_ID,
+            next_packet_id: initial_packet_id(),
         };
 
         conn.auth(password).await?;
@@ -125,7 +154,7 @@ impl Connection {
         self.next_packet_id = self
             .next_packet_id
             .checked_add(1)
-            .unwrap_or(INITIAL_PACKET_ID);
+            .unwrap_or(PACKET_ID_START);
 
         id
     }
