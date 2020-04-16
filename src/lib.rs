@@ -33,32 +33,26 @@ pub struct Connection {
     next_packet_id: i32,
 }
 
+/// Generate a random postive i32
+/// Hack that uses the randomized hash map hashing as a rng
+/// \#nodeps
 fn initial_packet_id() -> i32 {
     use std::collections::hash_map::RandomState;
-    use std::hash::{BuildHasher, Hash, Hasher};
+    use std::hash::{BuildHasher, Hasher};
 
-    // State seeded by the os rng on program start
+    // State seeded by the os rng on first use here or in a hash map
     // Each call to new increments the state
     let s = RandomState::new();
-    let mut h = s.build_hasher();
-    // The thread id is not very random and is usually 1 in rust on linux
-    // On linux thread ids are only unique in one process.
-    // This is because rust sets up mulithreading protection and the main thread
-    // gets the tid of 1. If rust did not do this and the user did not create
-    // threads the thread id would be the process id.
-    // On windows thread ids are unique system wide.
-    // Windows: https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getcurrentthreadid
-    // Linux: https://linux.die.net/man/2/gettid
-    //
-    // SipHash is the default hashing algorithm for rust
-    // Because SipHash is a MAC an attacker should not be able to predict
-    // the value of state. Even if they guess the thread id this will not
-    // reveal the secret and not let them predict future packet ids
-    std::thread::current().id().hash(&mut h);
-    let hash: u64 = h.finish();
 
-    // Use all 64 bits of hash
+    // SipHash is the default hashing algorithm for rust Because SipHash
+    // is a MAC an attacker should not be able to predict the value of state
+    // by the hash result. Even without hashing anything the state of the
+    // secret is protected and not let attackers predict future packet ids
+    let hash: u64 = s.build_hasher().finish();
+
+    // Use all 64 bits of hash and makes it more dificult to get the state
     // The absolute value op removes 1 bit of randomness but that is fine
+    // On abs overflow you get a negative value. This corrects for that.
     ((hash ^ hash >> 32) as i32).abs()
 }
 
