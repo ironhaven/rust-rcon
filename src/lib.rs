@@ -33,9 +33,6 @@ pub struct Connection {
     next_packet_id: i32,
 }
 
-/// Generate a random postive i32
-/// Hack that uses the randomized hash map hashing as a rng
-/// \#nodeps
 fn initial_packet_id() -> i32 {
     use std::collections::hash_map::RandomState;
     use std::hash::{BuildHasher, Hasher};
@@ -52,8 +49,10 @@ fn initial_packet_id() -> i32 {
 
     // Use all 64 bits of hash and makes it more dificult to get the state
     // The absolute value op removes 1 bit of randomness but that is fine
-    // On abs overflow you get a negative value. This corrects for that.
-    ((hash ^ hash >> 32) as i32).abs()
+    ((hash ^ hash >> 32) as i32)
+        // On abs overflow you get a negative value. This corrects for that.
+        .checked_abs()
+        .unwrap_or(PACKET_ID_START)
 }
 
 const PACKET_ID_START: i32 = 1;
