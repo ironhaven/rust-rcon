@@ -49,10 +49,8 @@ fn initial_packet_id() -> i32 {
 
     // Use all 64 bits of hash and makes it more dificult to get the state
     // The absolute value op removes 1 bit of randomness but that is fine
-    ((hash ^ hash >> 32) as i32)
-        // On abs overflow you get a negative value. This corrects for that.
-        .checked_abs()
-        .unwrap_or(PACKET_ID_START)
+    // The bitwacking zeros out the sign bit making all numbers postive
+    ((hash ^ hash >> 32) as i32) & !(1 << 31)
 }
 
 const PACKET_ID_START: i32 = 1;
