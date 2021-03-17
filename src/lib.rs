@@ -9,7 +9,7 @@
 
 use err_derive::Error;
 use packet::{Packet, PacketType};
-use std::io;
+use std::{f32::MIN, io};
 use std::time::Duration;
 use tokio::net::{TcpStream, ToSocketAddrs};
 
@@ -31,37 +31,67 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-pub struct Connection {
-    stream: TcpStream,
-    next_packet_id: i32,
-    minecraft_quirks_enabled: bool,
-    factorio_quirks_enabled: bool,
+pub trait Quirks {
+    fn limit_payload_size(&self) -> bool;
+    fn add_packet_delay(&self) -> bool;
+    fn use_single_packet(&self) -> bool;
 }
 
-impl Connection {
-    /// Create a connectiion builder.
-    /// Allows configuring the rcon connection.
-    pub fn builder() -> Builder {
-        Builder::new()
+pub struct Minecraft;
+
+impl Quirks for Minecraft {
+    fn limit_payload_size(&self) -> bool {
+        true
     }
 
+    fn add_packet_delay(&self) -> bool {
+        true
+    }
+
+    fn use_single_packet(&self) -> bool {
+        false
+    }
+}
+
+pub struct Connection<Q: Quirks> {
+    stream: TcpStream,
+    next_packet_id: i32,
+    quirks: Q
+}
+
+impl Connection<QuirkBuilder> {
+    /// Create a connectiion builder.
+    /// Allows configuring the rcon connection.
+    pub fn builder() -> QuirkBuilder {
+        QuirkBuilder::new()
+    }
+}
+
+impl<Q: Quirks>  Connection<Q> {
     /// Connect to an rcon server.
     /// By default this enables minecraft quirks.
     /// If you need to customize this behaviour, use a Builder.
-    pub async fn connect<T: ToSocketAddrs>(address: T, password: &str) -> Result<Connection> {
-        Self::builder()
-            .enable_minecraft_quirks(true)
-            .connect(address, password).await
+    pub async fn connect<T: ToSocketAddrs>(address: T, password: &str) -> Result<Connection<Minecraft>> {
+        let stream = TcpStream::connect(address).await?;
+        let mut conn = Connection {
+            stream,
+            next_packet_id: INITIAL_PACKET_ID,
+            quirks: Minecraft
+        };
+
+        conn.auth(password).await?;
+
+        Ok(conn)
     }
 
     pub async fn cmd(&mut self, cmd: &str) -> Result<String> {
-        if self.minecraft_quirks_enabled && cmd.len() > MINECRAFT_MAX_PAYLOAD_SIZE {
+        if self.quirks.limit_payload_size() && cmd.len() > MINECRAFT_MAX_PAYLOAD_SIZE {
             return Err(Error::CommandTooLong);
         }
 
         self.send(PacketType::ExecCommand, cmd).await?;
 
-        if self.minecraft_quirks_enabled {
+        if self.quirks.add_packet_delay() {
             tokio::time::sleep(Duration::from_millis(DELAY_TIME_MILLIS)).await;
         }
 
@@ -71,7 +101,7 @@ impl Connection {
     }
 
     async fn receive_response(&mut self) -> Result<String> {
-        if self.factorio_quirks_enabled {
+        if self.quirks.use_single_packet() {
             self.receive_single_packet_response().await
         } else {
             self.receive_multi_packet_response().await
@@ -148,12 +178,27 @@ impl Connection {
 }
 
 #[derive(Default, Debug)]
-pub struct Builder {
-    minecraft_quirks_enabled: bool,
-    factorio_quirks_enabled: bool,
+pub struct QuirkBuilder {
+    limit_payload_size: bool,
+    add_packet_delay: bool,
+    use_single_packet: bool
 }
 
-impl Builder {
+impl Quirks for QuirkBuilder {
+    fn limit_payload_size(&self) -> bool {
+        self.limit_payload_size
+    }
+
+    fn add_packet_delay(&self) -> bool {
+        self.add_packet_delay
+    }
+
+    fn use_single_packet(&self) -> bool {
+        self.use_single_packet
+    }
+}
+
+impl QuirkBuilder {
     pub fn new() -> Self {
         Self::default()
     }
@@ -167,7 +212,8 @@ impl Builder {
     /// Tests have shown the server to not work reliably
     /// with greater command lengths.
     pub fn enable_minecraft_quirks(mut self, value: bool) -> Self {
-        self.minecraft_quirks_enabled = value;
+        self.limit_payload_size = value;
+        self.add_packet_delay = value;
         self
     }
 
@@ -177,11 +223,11 @@ impl Builder {
     /// Multi-packets appear to work differently than in other server implementations
     /// (an empty packet gives no response).
     pub fn enable_factorio_quirks(mut self, value: bool) -> Self {
-        self.factorio_quirks_enabled = value;
+        self.use_single_packet = value;
         self
     }
 
-    pub async fn connect<A>(self, address: A, password: &str) -> Result<Connection>
+    pub async fn connect<A>(self, address: A, password: &str) -> Result<Connection<QuirkBuilder>>
     where
         A: ToSocketAddrs
     {
@@ -189,8 +235,7 @@ impl Builder {
         let mut conn = Connection {
             stream,
             next_packet_id: INITIAL_PACKET_ID,
-            minecraft_quirks_enabled: self.minecraft_quirks_enabled,
-            factorio_quirks_enabled: self.factorio_quirks_enabled,
+            quirks: self
         };
 
         conn.auth(password).await?;

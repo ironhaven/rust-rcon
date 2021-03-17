@@ -7,7 +7,7 @@
 // notice may not be copied, modified, or distributed except
 // according to those terms.
 
-use rcon::{Connection, Error};
+use rcon::{Connection, Error, Quirks};
 
 /*
     This example expects a Minecraft with rcon enabled on port 25575
@@ -28,7 +28,7 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-async fn demo(conn: &mut Connection, cmd: &str) -> Result<(), Error> {
+async fn demo<Q: Quirks>(conn: &mut Connection<Q>, cmd: &str) -> Result<(), Error> {
     let resp = conn.cmd(cmd).await?;
     println!("{}", resp);
     Ok(())

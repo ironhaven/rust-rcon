@@ -1,4 +1,4 @@
-use rcon::{Connection, Error};
+use rcon::{Connection, Error, Quirks};
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -14,7 +14,7 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-async fn demo(conn: &mut Connection, cmd: &str) -> Result<(), Error> {
+async fn demo<Q: Quirks>(conn: &mut Connection<Q>, cmd: &str) -> Result<(), Error> {
     println!("request: {}", cmd);
     let resp = conn.cmd(cmd).await?;
     println!("response: {}", resp);
